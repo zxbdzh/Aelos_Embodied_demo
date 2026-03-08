@@ -14,6 +14,8 @@ from tencentcloud.common import credential
 from tencentcloud.common.exception.tencent_cloud_sdk_exception import TencentCloudSDKException
 from tencentcloud.asr.v20190614 import asr_client, models
 from tencentcloud.tts.v20190823 import tts_client, models as tts_models
+from aelos_smart_ros.srv import CMDcontrol
+
 
 # 加载环境变量
 load_dotenv()
@@ -195,6 +197,10 @@ class LLMClient:
             return '{"action":"none","response":"抱歉我没听清"}'
 
 # ====================== 主函数 ======================
+def action(act_name, wait_time=20):
+    rospy.wait_for_service('action_receive')
+    val = rospy.ServiceProxy('action_receive', CMDcontrol)
+    resp1 = val(act_name, wait_time)
 def main():
     voice_tool = VoiceTool()
     llm_client = LLMClient()
@@ -223,6 +229,7 @@ def main():
                 
                 if action_name in ACTION_DIC and ACTION_STRATEGY:
                     print(f"\n🤖 执行动作：{ACTION_DIC[action_name]}")
+                    action(action_name, wait_time=1)
                     time.sleep(1)
                     
             except json.JSONDecodeError:
