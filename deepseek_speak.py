@@ -199,18 +199,32 @@ class LLMClient:
 
 # ====================== 主函数 ======================
 def action(act_name, wait_time=20):
-    rospy.wait_for_service('action_receive')
-    val = rospy.ServiceProxy('action_receive', CMDcontrol)
-    resp1 = val(act_name, wait_time)
+    try:
+        rospy.wait_for_service('action_receive', timeout=5.0)
+        val = rospy.ServiceProxy('action_receive', CMDcontrol)
+        resp1 = val(act_name, wait_time)
+        return True
+    except rospy.ROSException:
+        print("❌ ROS服务 action_receive 不可用")
+        return False
+    except rospy.ServiceException as e:
+        print(f"❌ 调用服务失败：{e}")
+        return False
+
 def main():
-    rospy.init_node('voice_dialog_system', anonymous=True)
     voice_tool = VoiceTool()
     llm_client = LLMClient()
     
     print("\n🚀 终极版语音对话系统（aplay播放）启动，按Ctrl+C退出\n")
     
+    # 延迟初始化 ROS 节点，避免阻塞信号处理
     try:
-        while True:
+        rospy.init_node('voice_dialog_system', anonymous=True, disable_signals=True)
+    except:
+        pass
+    
+    try:
+        while not rospy.is_shutdown():
             user_text = voice_tool.record_and_recognize(duration=3)
             if user_text == "SILENCE" or not user_text:
                 time.sleep(0.5)
