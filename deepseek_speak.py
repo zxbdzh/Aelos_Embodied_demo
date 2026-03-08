@@ -8,6 +8,7 @@ import array
 import subprocess
 import uuid
 import tempfile
+import re
 from dotenv import load_dotenv
 from openai import OpenAI
 from tencentcloud.common import credential
@@ -37,70 +38,100 @@ TTS_MAX_TEXT_LEN = int(os.getenv("TTS_MAX_TEXT_LEN", "100"))
 class RobotConfig:
     """运行时可调整的机器人参数"""
     
-    # 腾讯云TTS支持的音色
     VOICE_OPTIONS = {
-        "智瑜": 101001,    # 女声
-        "智聆": 101002,    # 女声
-        "智美": 101003,    # 女声
-        "希希": 101004,    # 女声
-        "智强": 101006,    # 男声
-        "智芸": 101007,    # 女声
-        "智华": 101008,    # 男声
-        "智辉": 101010,    # 男声
+        "智瑜": 101001,
+        "智聆": 101002,
+        "智美": 101003,
+        "希希": 101004,
+        "智强": 101006,
+        "智芸": 101007,
+        "智华": 101008,
+        "智辉": 101010,
     }
     
     def __init__(self):
-        self.tts_volume = int(os.getenv("TTS_VOLUME", "5"))  # TTS音量 0-10
-        self.tts_speed = int(os.getenv("TTS_SPEED", "0"))    # TTS语速 -2 到 2
-        self.voice_type = int(os.getenv("TTS_VOICE_TYPE", "101001"))  # 音色ID
-        self.play_volume = int(os.getenv("PLAY_VOLUME", "100"))  # 播放音量百分比
+        self.tts_volume = int(os.getenv("TTS_VOLUME", "5"))
+        self.tts_speed = int(os.getenv("TTS_SPEED", "0"))
+        self.voice_type = int(os.getenv("TTS_VOICE_TYPE", "101001"))
+        self.play_volume = int(os.getenv("PLAY_VOLUME", "100"))
+        self.config_changed = False
         
     def set_volume(self, volume):
-        """设置TTS音量 (0-10)"""
         self.tts_volume = max(0, min(10, volume))
         print(f"🔊 TTS音量已设置为: {self.tts_volume}")
+        self.config_changed = True
         
     def set_speed(self, speed):
-        """设置TTS语速 (-2 到 2)"""
         self.tts_speed = max(-2, min(2, speed))
         print(f"⚡ TTS语速已设置为: {self.tts_speed}")
+        self.config_changed = True
         
     def set_voice(self, voice_name):
-        """通过音色名称设置音色"""
         if voice_name in self.VOICE_OPTIONS:
             self.voice_type = self.VOICE_OPTIONS[voice_name]
             print(f"🎤 音色已设置为: {voice_name}")
-            return True
-        return False
-    
-    def set_voice_by_id(self, voice_id):
-        """通过音色ID设置音色"""
-        if voice_id in self.VOICE_OPTIONS.values():
-            self.voice_type = voice_id
-            name = [k for k, v in self.VOICE_OPTIONS.items() if v == voice_id][0]
-            print(f"🎤 音色已设置为: {name}")
+            self.config_changed = True
             return True
         return False
     
     def set_play_volume(self, volume):
-        """设置播放音量 (0-100)"""
         self.play_volume = max(0, min(100, volume))
         print(f"📢 播放音量已设置为: {self.play_volume}%")
+        self.config_changed = True
         
     def get_voice_list(self):
-        """获取所有可用音色"""
         return list(self.VOICE_OPTIONS.keys())
+    
+    def save_to_env(self):
+        """保存配置到 .env 文件"""
+        if not self.config_changed:
+            return
+        
+        env_path = ".env"
+        lines = []
+        
+        # 读取现有 .env 内容
+        if os.path.exists(env_path):
+            with open(env_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        
+        # 需要更新的配置
+        config_map = {
+            "TTS_VOLUME": str(self.tts_volume),
+            "TTS_SPEED": str(self.tts_speed),
+            "TTS_VOICE_TYPE": str(self.voice_type),
+            "PLAY_VOLUME": str(self.play_volume),
+        }
+        
+        # 更新或添加配置
+        for key, value in config_map.items():
+            found = False
+            for i, line in enumerate(lines):
+                if line.startswith(f"{key}="):
+                    lines[i] = f"{key}={value}\n"
+                    found = True
+                    break
+            if not found:
+                lines.append(f"{key}={value}\n")
+        
+        # 写回文件
+        with open(env_path, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+        
+        self.config_changed = False
+        print("💾 配置已保存")
 
 # ====================== 工具函数 ======================
 def clean_tts_text(text):
-    """仅保留纯中文"""
+    """保留中文和标点符号"""
     if not text:
         return "你好呀"
-    text = text.strip().replace("\n", "").replace("\t", "").replace("  ", " ")
-    clean_text = ""
-    for c in text:
-        if '\u4e00' <= c <= '\u9fff':
-            clean_text += c
+    text = text.strip().replace("\n", " ").replace("\t", " ")
+    # 保留中文、中文标点和常见标点
+    allowed_chars = r'[\u4e00-\u9fff，。！？、；：""''…—～\s]'
+    clean_text = "".join(re.findall(allowed_chars, text))
+    # 去除多余空格
+    clean_text = re.sub(r'\s+', '', clean_text)
     if len(clean_text) > TTS_MAX_TEXT_LEN:
         clean_text = clean_text[:TTS_MAX_TEXT_LEN]
     return clean_text if clean_text else "你好呀"
@@ -116,14 +147,22 @@ def check_audio_volume(audio_path, threshold):
         return False
 
 def install_dependencies():
-    """自动安装ffmpeg（MP3转WAV需要）和aplay（一般自带）"""
     if subprocess.run(["which", "ffmpeg"], capture_output=True).returncode != 0:
-        print("⚠️ 安装ffmpeg（MP3转WAV依赖）...")
+        print("⚠️ 安装ffmpeg...")
         subprocess.run(["sudo", "apt", "update", "-y"], stdout=subprocess.DEVNULL)
         subprocess.run(["sudo", "apt", "install", "-y", "ffmpeg"], stdout=subprocess.DEVNULL)
     if subprocess.run(["which", "aplay"], capture_output=True).returncode != 0:
-        print("⚠️ 安装alsa-utils（aplay依赖）...")
+        print("⚠️ 安装alsa-utils...")
         subprocess.run(["sudo", "apt", "install", "-y", "alsa-utils"], stdout=subprocess.DEVNULL)
+
+def play_beep():
+    """播放提示音"""
+    try:
+        # 使用系统蜂鸣器或 speaker-test 生成简短提示音
+        subprocess.run(["speaker-test", "-t", "sine", "-f", "1000", "-l", "1"], 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.3)
+    except:
+        pass
 
 # ====================== 腾讯云ASR+TTS工具类 ======================
 class VoiceTool:
@@ -143,6 +182,10 @@ class VoiceTool:
     def record_and_recognize(self, duration=3):
         save_path = "recording.wav"
         record_cmd = RECORD_CMD.format(duration=duration, save_path=save_path)
+        
+        # 播放提示音提醒用户可以说话
+        play_beep()
+        
         print(f"\n🎙️ 录音中（{duration}秒）...")
         subprocess.run(record_cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
@@ -173,16 +216,16 @@ class VoiceTool:
             return
         
         clean_text = clean_tts_text(text)
-        print(f"📝 纯中文合成文本：{clean_text}")
+        print(f"📝 合成文本：{clean_text}")
         
         try:
             req = tts_models.TextToVoiceRequest()
             req.Text = clean_text
-            req.VoiceType = self.config.voice_type  # 使用配置中的音色
+            req.VoiceType = self.config.voice_type
             req.Codec = "mp3"
             req.SessionId = str(uuid.uuid4()).replace("-", "")[:16]
-            req.Speed = self.config.tts_speed      # 使用配置中的语速
-            req.Volume = self.config.tts_volume    # 使用配置中的音量
+            req.Speed = self.config.tts_speed
+            req.Volume = self.config.tts_volume
             
             resp = self.tts_client.TextToVoice(req)
             audio_base64 = resp.Audio
@@ -203,19 +246,15 @@ class VoiceTool:
             subprocess.run(ffmpeg_cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             print(f"🔊 播放：{clean_text}")
-            # 使用 ffmpeg 控制音量，然后播放
             volume_ratio = self.config.play_volume / 100.0
             tmp_wav_adj = tempfile.mktemp(suffix=".wav")
             ffmpeg_vol_cmd = f"ffmpeg -i {tmp_wav} -y -af volume={volume_ratio} {tmp_wav_adj}"
             subprocess.run(ffmpeg_vol_cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # 播放调整音量后的音频
             subprocess.run(PLAY_WAV_CMD.format(file_path=tmp_wav_adj).split(), stdout=subprocess.DEVNULL)
             
-            # 清理调整后的临时文件
             if os.path.exists(tmp_wav_adj):
                 os.remove(tmp_wav_adj)
-            
             os.remove(tmp_mp3)
             os.remove(tmp_wav)
         except Exception as e:
@@ -246,14 +285,20 @@ class LLMClient:
 可用音色: {voice_list}
 
 返回格式：
-{{"response": "回复内容", "config": {{"volume": 数字, "speed": 数字, "voice": "音色名", "play_volume": 数字}}}}
+{{"response": "回复内容，可以包含标点符号", "command": "命令", "config": {{"volume": 数字, "speed": 数字, "voice": "音色名", "play_volume": 数字}}}}
 
-config字段可选，仅当用户要求修改参数时才包含。response字段必填，仅用中文汉字（无标点），≤50字。
+command字段可选：
+- "exit" - 用户说再见、拜拜等要退出时
+- 无此字段 - 继续对话
+
+config字段可选，仅当用户要求修改参数时才包含。
 
 示例：
-用户: "把音量调大一点" -> {{"response": "好的音量已调大", "config": {{"volume": 8}}}}
-用户: "换成男声" -> {{"response": "好的已切换为男声", "config": {{"voice": "智强"}}}}
-用户: "你好" -> {{"response": "你好很高兴见到你"}}
+用户: "再见" -> {{"response": "好的，再见！", "command": "exit"}}
+用户: "把音量调大一点" -> {{"response": "好的，音量已调大。", "config": {{"volume": 8}}}}
+用户: "换成男声" -> {{"response": "好的，已切换为男声。", "config": {{"voice": "智强"}}}}
+用户: "你好" -> {{"response": "你好，很高兴见到你！"}}
+
 用户输入：{user_text}
 """
         try:
@@ -266,7 +311,7 @@ config字段可选，仅当用户要求修改参数时才包含。response字段
             return completion.choices[0].message.content.strip()
         except Exception as e:
             print(f"❌ LLM调用失败：{e}")
-            return '{"response": "抱歉我没听清"}'
+            return '{"response": "抱歉，我没听清。"}'
 
 # ====================== 主函数 ======================
 def main():
@@ -280,7 +325,7 @@ def main():
     print(f"TTS音量: {config.tts_volume}, 语速: {config.tts_speed}")
     print(f"播放音量: {config.play_volume}%")
     print("可用音色:", ", ".join(config.get_voice_list()))
-    print("按Ctrl+C退出")
+    print("说'再见'或'拜拜'可退出程序")
     print("="*50 + "\n")
     
     try:
@@ -299,6 +344,7 @@ def main():
                     llm_raw = llm_raw.split("```json")[1].split("```")[0].strip()
                 resp_dict = json.loads(llm_raw)
                 tts_text = resp_dict.get("response", "你好呀")
+                command = resp_dict.get("command", "")
                 
                 # 处理配置修改
                 if "config" in resp_dict:
@@ -311,12 +357,19 @@ def main():
                         config.set_voice(cfg["voice"])
                     if "play_volume" in cfg:
                         config.set_play_volume(cfg["play_volume"])
+                    # 保存配置到 .env
+                    config.save_to_env()
                 
                 voice_tool.tts_and_play(tts_text)
+                
+                # 处理退出命令
+                if command == "exit":
+                    print("\n👋 再见！")
+                    break
                     
             except json.JSONDecodeError:
                 print("⚠️ JSON解析失败，播放默认回复")
-                voice_tool.tts_and_play("抱歉我没理解你的意思")
+                voice_tool.tts_and_play("抱歉，我没理解你的意思。")
             except Exception as e:
                 print(f"❌ 处理异常：{e}")
             
