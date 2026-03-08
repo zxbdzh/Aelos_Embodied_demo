@@ -277,15 +277,14 @@ class LLMClient:
 你是一个智能语音助手。根据用户输入，返回JSON格式的响应。
 
 当前配置：
-- TTS音量: {self.config.tts_volume} (范围0-10)
+- 播放音量: {self.config.play_volume}% (范围0-100，控制最终播放声音大小)
 - TTS语速: {self.config.tts_speed} (范围-2到2)  
 - 音色ID: {self.config.voice_type}
-- 播放音量: {self.config.play_volume}% (范围0-100)
 
 可用音色: {voice_list}
 
 返回格式：
-{{"response": "回复内容，可以包含标点符号", "command": "命令", "config": {{"volume": 数字, "speed": 数字, "voice": "音色名", "play_volume": 数字}}}}
+{{"response": "回复内容，可以包含标点符号", "command": "命令", "config": {{"play_volume": 数字, "speed": 数字, "voice": "音色名"}}}}
 
 command字段可选：
 - "exit" - 用户说再见、拜拜等要退出时
@@ -293,9 +292,12 @@ command字段可选：
 
 config字段可选，仅当用户要求修改参数时才包含。
 
+重要：用户说"声音大/小"、"音量大/小"时，统一使用 play_volume 字段（0-100范围），效果更明显。
+
 示例：
 用户: "再见" -> {{"response": "好的，再见！", "command": "exit"}}
-用户: "把音量调大一点" -> {{"response": "好的，音量已调大。", "config": {{"volume": 8}}}}
+用户: "声音调大一点" -> {{"response": "好的，声音已调大。", "config": {{"play_volume": {min(self.config.play_volume + 20, 100)}}}}}
+用户: "声音小一点" -> {{"response": "好的，声音已调小。", "config": {{"play_volume": {max(self.config.play_volume - 20, 0)}}}}}
 用户: "换成男声" -> {{"response": "好的，已切换为男声。", "config": {{"voice": "智强"}}}}
 用户: "你好" -> {{"response": "你好，很高兴见到你！"}}
 
