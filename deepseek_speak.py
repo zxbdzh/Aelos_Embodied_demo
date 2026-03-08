@@ -8,6 +8,7 @@ import array
 import subprocess
 import uuid
 import tempfile
+import rospy
 from dotenv import load_dotenv
 from openai import OpenAI
 from tencentcloud.common import credential
@@ -202,6 +203,7 @@ def action(act_name, wait_time=20):
     val = rospy.ServiceProxy('action_receive', CMDcontrol)
     resp1 = val(act_name, wait_time)
 def main():
+    rospy.init_node('voice_dialog_system', anonymous=True)
     voice_tool = VoiceTool()
     llm_client = LLMClient()
     
