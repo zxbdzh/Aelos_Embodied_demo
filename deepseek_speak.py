@@ -203,9 +203,18 @@ class VoiceTool:
             subprocess.run(ffmpeg_cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             print(f"🔊 播放：{clean_text}")
-            # 使用播放音量控制
-            play_cmd = f"aplay -q -v {self.config.play_volume}% {tmp_wav}"
-            subprocess.run(play_cmd.split(), stdout=subprocess.DEVNULL)
+            # 使用 ffmpeg 控制音量，然后播放
+            volume_ratio = self.config.play_volume / 100.0
+            tmp_wav_adj = tempfile.mktemp(suffix=".wav")
+            ffmpeg_vol_cmd = f"ffmpeg -i {tmp_wav} -y -af volume={volume_ratio} {tmp_wav_adj}"
+            subprocess.run(ffmpeg_vol_cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # 播放调整音量后的音频
+            subprocess.run(PLAY_WAV_CMD.format(file_path=tmp_wav_adj).split(), stdout=subprocess.DEVNULL)
+            
+            # 清理调整后的临时文件
+            if os.path.exists(tmp_wav_adj):
+                os.remove(tmp_wav_adj)
             
             os.remove(tmp_mp3)
             os.remove(tmp_wav)
